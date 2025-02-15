@@ -1,0 +1,61 @@
+pipeline {
+    agent any
+
+    environment {
+        AWS_REGION = "us-east-1"
+        STACK_NAME = "PrimerStack"
+    }
+
+    stages {
+        stage('Get Code') {
+            steps {
+                echo "Clonando el código de la rama develop"
+                git branch: 'main', url: 'https://github.com/martaavi/todo-list-aws'
+            }
+        }
+
+        
+
+        stage('Deploy') {
+            environment {
+                S3_BUCKET = "cp14-sam-deploy-${BUILD_NUMBER}"
+            }
+            
+            steps {
+                echo "Desplegando con AWS SAM"
+                sh '''
+                    aws s3 mb "s3://$S3_BUCKET" --region $AWS_REGION || echo "El bucket ya existe"
+                    sam build
+                    sam validate --region $AWS_REGION
+                    sam deploy --stack-name $STACK_NAME --region $AWS_REGION --s3-bucket $S3_BUCKET --capabilities CAPABILITY_IAM --no-confirm-changeset --parameter-overrides Environment=production
+                '''
+            }
+        }
+
+        stage('Rest Test') {
+            steps {
+                echo "Ejecutando pruebas de integración con Pytest"
+
+                sh '''
+                    # Obtener la URL de la API desde CloudFormation
+                    export BASE_URL=$(aws cloudformation describe-stacks --stack-name $STACK_NAME \
+                        --query "Stacks[0].Outputs[?OutputKey=='BaseUrlApi'].OutputValue" \
+                        --output text --region $AWS_REGION)
+
+                    echo "API Base URL: $BASE_URL"
+
+                    
+                    # Exportar la variable de entorno para Pytest
+                    export BASE_URL
+
+                    # Ejecutar los tests de integración
+                    pytest --junitxml=result-integration.xml -k "test_api_listtodos or test_api_gettodo" test/integration/todoApiTest.py
+                '''
+
+                junit 'result-integration.xml'
+            }
+        }
+
+        
+    }
+}

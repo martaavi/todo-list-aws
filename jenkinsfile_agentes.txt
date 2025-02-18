@@ -1,0 +1,98 @@
+pipeline {
+    agent any
+
+    environment {
+        AWS_REGION = "us-east-1"
+        STACK_NAME = "PrimerStack"
+    }
+
+    stages {
+        stage('Get Code') {
+            steps {
+                echo "Clonando el código de la rama develop"
+                sh 'echo "Ejecutando en $(hostname) por $(whoami)"'
+                git branch: 'develop', url: 'https://github.com/martaavi/todo-list-aws'
+            }
+        }
+
+        stage('Flake8 y Bandit') {
+            agent { label 'agent1' }
+            steps {
+                sh 'echo "Ejecutando análisis en $(hostname) por $(whoami)"'
+                echo "Ejecutando análisis estático con Flake8"
+                sh 'python3 -m flake8 --exit-zero --format=pylint src > flake8.out'
+                echo "Ejecutando análisis de seguridad con Bandit"
+                sh 'python3 -m bandit --exit-zero -r src -f custom -o bandit.out --severity-level medium --msg-template "{abspath}:{line}: [{test_id}] {msg}"'
+            }
+        }
+        
+        stage('Deploy') {
+            environment {
+                S3_BUCKET = "cp14-sam-deploy-${BUILD_NUMBER}"
+            }
+
+            steps {
+                sh 'echo "Ejecutando despliegue en $(hostname) por $(whoami)"'
+                echo "Desplegando con AWS SAM"
+                sh '''
+                    aws s3 mb "s3://$S3_BUCKET" --region $AWS_REGION || echo "El bucket ya existe"
+                    sam build
+                    sam validate --region $AWS_REGION
+                    sam deploy --stack-name $STACK_NAME --region $AWS_REGION --s3-bucket $S3_BUCKET --capabilities CAPABILITY_IAM --no-confirm-changeset --parameter-overrides Environment=staging
+                '''
+            }
+        }
+
+        stage('Rest Test') {
+            agent { label 'agent2' }
+            steps {
+                sh 'echo "Ejecutando pruebas en $(hostname) por $(whoami)"'
+                echo "Ejecutando pruebas de integración con Pytest"
+
+                sh '''
+                    # Obtener la URL de la API desde CloudFormation
+                    export BASE_URL=$(aws cloudformation describe-stacks --stack-name $STACK_NAME \
+                        --query "Stacks[0].Outputs[?OutputKey=='BaseUrlApi'].OutputValue" \
+                        --output text --region $AWS_REGION)
+
+                    echo "API Base URL: $BASE_URL"
+
+                    if [ -z "$BASE_URL" ]; then
+                        echo "ERROR: No se pudo obtener la URL de la API"
+                        exit 1
+                    fi
+
+                    # Validar si la API responde antes de correr las pruebas
+                    STATUS=$(curl -s -o /dev/null -w "%{http_code}" "$BASE_URL/todos")
+                    if [ "$STATUS" -ne 200 ]; then
+                        echo "ERROR: La API no responde correctamente (Código HTTP: $STATUS)"
+                        exit 1
+                    fi
+
+                    # Exportar la variable de entorno para Pytest
+                    export BASE_URL
+
+                    # Ejecutar los tests de integración
+                    pytest --junitxml=result-integration.xml test/integration/todoApiTest.py
+                '''
+
+                junit 'result-integration.xml'
+            }
+        }
+
+        stage('Promote') {
+            steps {
+                sh 'echo "Ejecutando promoción en $(hostname) por $(whoami)"'
+                echo "Promoviendo cambios a producción"
+                withCredentials([usernamePassword(credentialsId: 'github-credentials', usernameVariable: 'GIT_USER', passwordVariable: 'GIT_PASS')]) {
+                    sh '''
+                        git checkout develop
+                        git pull origin develop
+                        git merge develop -m "Promoción a producción"
+                        git push https://$GIT_USER:$GIT_PASS@github.com/martaavi/todo-list-aws.git develop
+                    '''
+                }
+            }
+        }
+    }
+}

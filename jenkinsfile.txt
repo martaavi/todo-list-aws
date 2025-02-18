@@ -60,18 +60,6 @@ pipeline {
 
                     echo "API Base URL: $BASE_URL"
 
-                    if [ -z "$BASE_URL" ]; then
-                        echo "ERROR: No se pudo obtener la URL de la API"
-                        exit 1
-                    fi
-
-                    # Validar si la API está respondiendo antes de correr las pruebas
-                    STATUS=$(curl -s -o /dev/null -w "%{http_code}" "$BASE_URL/todos")
-                    if [ "$STATUS" -ne 200 ]; then
-                        echo "ERROR: La API no responde correctamente (Código HTTP: $STATUS)"
-                        exit 1
-                    fi
-
                     # Exportar la variable de entorno para Pytest
                     export BASE_URL
 

@@ -76,10 +76,10 @@ pipeline {
                 echo "Promoviendo cambios a producción"
                 withCredentials([usernamePassword(credentialsId: 'github-credentials', usernameVariable: 'GIT_USER', passwordVariable: 'GIT_PASS')]) {
                     sh '''
-                        git checkout main
-                        git pull origin main
+                        git checkout develop
+                        git pull origin develop
                         git merge develop -m "Promoción a producción"
-                        git push https://$GIT_USER:$GIT_PASS@github.com/martaavi/todo-list-aws.git main
+                        git push https://$GIT_USER:$GIT_PASS@github.com/martaavi/todo-list-aws.git develop
                     '''
                 }
             }

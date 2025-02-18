@@ -88,7 +88,7 @@ pipeline {
                     sh '''
                         git checkout develop
                         git pull origin develop
-                        git merge develop -m "Promoción a producción"
+                        git merge main -m "Promoción a producción"
                         git push https://$GIT_USER:$GIT_PASS@github.com/martaavi/todo-list-aws.git develop
                     '''
                 }

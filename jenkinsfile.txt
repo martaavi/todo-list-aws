@@ -9,12 +9,28 @@ pipeline {
     stages {
         stage('Get Code') {
             steps {
-                echo "Clonando el código de la rama develop"
+                echo "Clonando el código de la rama main"
                 git branch: 'main', url: 'https://github.com/martaavi/todo-list-aws'
             }
         }
 
-        
+        stage('Static Tests') {
+            parallel {
+                stage('Flake8') {
+                    steps {
+                        echo "Ejecutando análisis estático con Flake8"
+                        sh 'python3 -m flake8 --exit-zero --format=pylint src > flake8.out'
+                    }
+                }
+
+                stage('Bandit') {
+                    steps {
+                        echo "Ejecutando análisis de seguridad con Bandit"
+                        sh 'python3 -m bandit --exit-zero -r src -f custom -o bandit.out --severity-level medium --msg-template "{abspath}:{line}: [{test_id}] {msg}"'
+                    }
+                }
+            }
+        }
 
         stage('Deploy') {
             environment {
@@ -44,7 +60,6 @@ pipeline {
 
                     echo "API Base URL: $BASE_URL"
 
-                    
                     # Exportar la variable de entorno para Pytest
                     export BASE_URL
 
@@ -56,6 +71,18 @@ pipeline {
             }
         }
 
-        
+        stage('Promote') {
+            steps {
+                echo "Promoviendo cambios a producción"
+                withCredentials([usernamePassword(credentialsId: 'github-credentials', usernameVariable: 'GIT_USER', passwordVariable: 'GIT_PASS')]) {
+                    sh '''
+                        git checkout main
+                        git pull origin main
+                        git merge main -m "Deplegar a rama principal"
+                        git push https://$GIT_USER:$GIT_PASS@github.com/martaavi/todo-list-aws.git main
+                    '''
+                }
+            }
+        }
     }
 }
